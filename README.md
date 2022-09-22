@@ -1,4 +1,4 @@
-# videoMagic
+# Video Magic
 This is a computer vision project designed to overlay images of "magic" based on hand movements. It is a work in progress.
 
 Snapping your fingers and holding them in the ending position created an animated flame on the thumb tip
