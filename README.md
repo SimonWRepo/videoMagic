@@ -6,3 +6,5 @@ Snapping your fingers and holding them in the ending position created an animate
 Putting your hands together and then quickly pulling them apart will create lightning between the two hands
 
 More upcoming
+
+A lot of the code also need refactoring and cleaning up
