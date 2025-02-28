@@ -1,5 +1,4 @@
 import time
-from numba import vectorize, cuda, jit, njit
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -8,28 +7,46 @@ from matplotlib import pyplot as plt
 from numpy import sqrt, square
 from sklearn.preprocessing import StandardScaler
 from cvzone.SelfiSegmentationModule import SelfiSegmentation
-from sklearn.neighbors import KNeighborsClassifier, BallTree, KDTree
-from keras.models import load_model
+from sklearn.neighbors import KNeighborsClassifier, KDTree
 
-import tensorflow as tf
-
-import csv
 import pandas as pd
-from sklearn.decomposition import PCA
-from handleEffects import snapChecker, snapDrawer, gunChecker, apartChecker, apartDrawer, drawChecker
+
+from determineShape import detCircle
+from handleEffects import snapChecker, snapDrawer, apartChecker, apartDrawer, drawChecker
 
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 mp_hands = mp.solutions.hands
+mp_face = mp.solutions.face_mesh
 segment = SelfiSegmentation()
+def runSIFT(img1):
+    # Initiate SIFT detector
+    sift = cv2.SIFT_create()
+    img2 = cv2.imread('C:\\Users\\Simon\\Documents\\Personal\\videoMagic\\sprites\\triangle.png',cv2.IMREAD_GRAYSCALE)
+    # find the keypoints and descriptors with SIFT
+    kp1, des1 = sift.detectAndCompute(img1,None)
+    kp2, des2 = sift.detectAndCompute(img2,None)
+    #print(grad1,grad2,c,bottomLeftVertex[1])
+    # BFMatcher with default params
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(des1,des2,k=2)
+    # Apply ratio test
+    good = []
+    for m,n in matches:
+        if m.distance < 0.5*n.distance:
+            good.append([m])
+    # cv.drawMatchesKnn expects list of lists as matches.
+    img3 = cv2.drawMatchesKnn(img1,kp1,img2,kp2,good,None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    plt.imshow(img3),plt.show()
 
 def main():
 
-    neigh = KNeighborsClassifier(n_neighbors=10)
+    neighbours = KNeighborsClassifier(n_neighbors=10)
     closeOrApart = KNeighborsClassifier(n_neighbors=5)
     line_count = 0
-    nfit = pd.read_csv("C:\\Users\\Simon\\Documents\\Personal\\videoMagic\csv_file.csv",skip_blank_lines=True)
+    nfit = pd.read_csv("csv_file.csv",skip_blank_lines=True)
     nfit.head()
+
     #get dataset
     x, y = nfit.iloc[:, :-1], nfit.iloc[:, [-1]]
     xCloseApart = nfit.iloc[:, 84]
@@ -37,7 +54,7 @@ def main():
     print(xCloseApart)
     kd = KDTree(x)
     closeOrApart.fit(xCloseApart, y.values.ravel())
-    neigh.fit(x.values, y.values.ravel())
+    neighbours.fit(x.values, y.values.ravel())
 
     cap = cv2.VideoCapture(0)
 
@@ -51,14 +68,15 @@ def main():
     lastDot = (0,0)
     #images for flame animation
     for x in range(1,9):
-        flame.append(cv2.imread("C:\\Users\\Simon\\Documents\\Personal\\videoMagic\\sprites\\flame" + str(x) + ".png",cv2.IMREAD_UNCHANGED))
+        flame.append(cv2.imread("sprites\\flame" + str(x) + ".png",cv2.IMREAD_UNCHANGED))
     #images for lightning animation
     for x in range(1,6):
-        lightning.append(cv2.imread("C:\\Users\\Simon\\Documents\\Personal\\videoMagic\\sprites\\lightning" + str(x) + ".png",cv2.IMREAD_UNCHANGED))
+        lightning.append(cv2.imread("sprites\\lightning" + str(x) + ".png",cv2.IMREAD_UNCHANGED))
+
     with mp_hands.Hands(
             model_complexity=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.3) as hands:
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.5) as hands:
         lostItCount = 0
 
         #what has the prediction been in the last 15 frames?
@@ -80,21 +98,29 @@ def main():
         lastIndexPositionsY = np.array([])
         #thumb coordinates of prev frame (for frame when hand isnt processed)
         thumbCoords = (0,0)
+
+        shownImage = np.empty(0)
         while cap.isOpened():
 
             start = time.time()
 
             count2 = count2 + 1
             success, image = cap.read()
+
             if not success:
-                print("Ignoring empty camera frame.")
+                print("No video found. Is your camera set up properly?")
                 # If loading a video, use 'break' instead of 'continue'.
                 break
+
+            if not shownImage.any():
+                shownImage = image
 
             # To improve performance, optionally mark the image as not writeable to
             # pass by reference.
             image.flags.writeable = False
             #only process 1/2 of the frames (laggy otherwise)
+
+            image = cv2.flip(image, 1)
             if count2%2==0:
                 count = count + 1
 
@@ -188,10 +214,13 @@ def main():
                         #how the x and y coords of the 0 positions of both hands are layed out in the np array
                         zx = abs(zCoords[0] - zCoords[2])
                         zy = abs(zCoords[1] - zCoords[3])
-                        nineDiffX = abs(zCoords[0] - nineCoords[0])
-                        nineDiffY = abs(zCoords[1] - nineCoords[1])
+                        nineDiffX = abs(zCoords[2] - nineCoords[0])
+                        nineDiffY = abs(zCoords[3] - nineCoords[1])
                         nineDiff = sqrt(square(nineDiffY) + square(nineDiffX))
+
                         diff = sqrt(square(zx) + square(zy))
+                        print(diff)
+                        print("nDiff ",zCoords)
                         diff = diff/nineDiff
                     #run the data on the model to predict the hand position
                     addUp1 = addUp[:42]
@@ -205,7 +234,7 @@ def main():
                     interest = np.append(interest,interest2)
 
                     interest = np.append(interest,[diff])
-                    thumbs = neigh.predict([interest])[0]
+                    thumbs = neighbours.predict([interest])[0]
                     print(diff)
                     if thumbs == 7 or thumbs == 8:
                         diff = np.array([diff])
@@ -224,14 +253,14 @@ def main():
                     #for the one index finger drawing mode
                     if drawActive == True:
                         if len(lastIndexPositionsX)>99:
-                            lastIndexPositionsX = np.roll(lastIndexPositionsX,-1)
-                            lastIndexPositionsY = np.roll(lastIndexPositionsY,-1)
-                            lastIndexPositionsX[99] = fingerCoordsX
-                            lastIndexPositionsY[99] = fingerCoordsY
-
+                            drawActive = False
+                            notCircle = detCircle(lastIndexPositionsX,lastIndexPositionsY)
+                            lastIndexPositionsX = np.array([])
+                            lastIndexPositionsY = np.array([])
                         else:
-                            lastIndexPositionsX = np.append(lastIndexPositionsX,fingerCoordsX)
-                            lastIndexPositionsY = np.append(lastIndexPositionsY,fingerCoordsY)
+                            if not (abs(lastDot[0]-fingerCoordsX) > 100 or abs(lastDot[1]-fingerCoordsY) > 100):
+                                lastIndexPositionsX = np.append(lastIndexPositionsX,fingerCoordsX)
+                                lastIndexPositionsY = np.append(lastIndexPositionsY,fingerCoordsY)
                         if(len(lastIndexPositionsX)>0):
                             #so a line isn't drawn from the first point to the last of the next frame
                             lastDot = (int(lastIndexPositionsX[0]),int(lastIndexPositionsY[0]))
@@ -257,42 +286,8 @@ def main():
                 #check whether 'apart' has occured
                 apartActive, apartCount, endApartCount = apartChecker(handConsistent, handEnd, apartActive)
                 #gunActive, gunEnded, gunCount, endGunCount = gunChecker(handConsistent, handEnd, gunActive, gunEnded, justShot, count)
-            else:
-                #if this is an 'off' frame, draw the snap or apart if it should be there
-                image = cv2.putText(image, str(lastThumb), (50,50), cv2.FONT_HERSHEY_SIMPLEX,
-                                    1, (255,255,255), 1, cv2.LINE_AA)
-                #for the one index finger drawing mode
-                if drawActive == True:
-                    if len(lastIndexPositionsX)>99:
-                        lastIndexPositionsX = np.roll(lastIndexPositionsX,-1)
-                        lastIndexPositionsY = np.roll(lastIndexPositionsY,-1)
-                        lastIndexPositionsX[99] = fingerCoordsX
-                        lastIndexPositionsY[99] = fingerCoordsY
-
-                    else:
-                        lastIndexPositionsX = np.append(lastIndexPositionsX,fingerCoordsX)
-                        lastIndexPositionsY = np.append(lastIndexPositionsY,fingerCoordsY)
-                    if(len(lastIndexPositionsX)>0):
-                        #so a line isn't drawn from the first point to the last of the next frame
-                        lastDot = (int(lastIndexPositionsX[0]),int(lastIndexPositionsY[0]))
-                    for lx,ly in zip(lastIndexPositionsX,lastIndexPositionsY):
-                        pt = (int(lx),int(ly))
-                        image = cv2.line(image, lastDot,pt,(0,0,0),1)
-                        lastDot = pt
-
-                else:
-                    lastIndexPositionsX = np.array([])
-                    lastIndexPositionsY = np.array([])
-                if snapActive == True:
-                    image = snapDrawer(image, endSnapCount, flame, count, thumbCoords[0] , thumbCoords[1], zeroy)
-                if apartActive == True:
-                    if runThroughTwice==2:
-                        image = apartDrawer(image, endApartCount, lightning, count2, middleCoords[0], middleCoords[1], middleCoords2[0],middleCoords2[1],zeroy)
-                #if gunActive == True:
-                    #print("hi2")
-                    #image = cv2.circle(image,(fingerCoords[0],fingerCoords[1]),5,(0,0,0),-1)
-
-            cv2.imshow('MediaPipe Hands', cv2.flip(image, 1))
+                shownImage = image
+            cv2.imshow('MediaPipe Hands', shownImage)
             if cv2.waitKey(5) & 0xFF == 27:
                 break
 
