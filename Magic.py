@@ -2,12 +2,9 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import sklearn
-from matplotlib import pyplot as plt
 from numpy import sqrt, square
 from sklearn.preprocessing import StandardScaler
 import csv
-import pandas as pd
-from sklearn.decomposition import PCA
 
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
@@ -95,7 +92,7 @@ with mp_hands.Hands(
 
                 diff = sqrt(square(x) + square(y))
                 print(diff)
-                print(nineDiff)
+                print("nDiff ",zeroCoords)
                 diff = diff/nineDiff
 
             #run the data on the model to predict the hand position
@@ -119,19 +116,16 @@ with mp_hands.Hands(
             #7 is 2 hands apart
             #8 is 2 hands together
             #9 is roiling hand
-            #10 is one finer
+            #10 is one finger
             addUp = np.append(addUp,[diff])
-            addUp = np.append(addUp,[10])
-            if addUp2[8] == -100:
+            addUp = np.append(addUp,[8])
+            if not addUp2[8] == -100:
                 writer.writerow(addUp)
         # Draw the hand annotations on the image.
         image.flags.writeable = True
         image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
         # write a row to the csv file
-
-
-
 
         cv2.imshow('MediaPipe Hands', cv2.flip(image, 1))
         if cv2.waitKey(5) & 0xFF == 27:
