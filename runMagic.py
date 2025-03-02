@@ -91,8 +91,8 @@ def main():
     cap.release()
 
 def handleSnapEffect(handleEffectsInstance, hand_landmarks, image, count, image_width, image_height):
-    thumbXCoordinate = int(hand_landmarks.landmark[4].x * image_width)
-    thumbYCoordinate = int(hand_landmarks.landmark[4].y * image_height)
+    thumbXCoordinate = int(hand_landmarks.landmark[Constants.THUMB_TIP].x * image_width)
+    thumbYCoordinate = int(hand_landmarks.landmark[Constants.THUMB_TIP].y * image_height)
     #draw the fire on the hand, just above the thumb
     return handleEffectsInstance.snapDrawer(image, count, thumbXCoordinate , thumbYCoordinate, int(hand_landmarks.landmark[0].y * image_height))
 
