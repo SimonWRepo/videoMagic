@@ -7,4 +7,4 @@ Putting your hands together and then quickly pulling them apart will create ligh
 
 More upcoming
 
-A lot of the code also need refactoring and cleaning up
+A lot of the code also needs refactoring and cleaning up
