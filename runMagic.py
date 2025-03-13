@@ -42,7 +42,7 @@ def main():
     #number of frames actually processed (half of frames shown)
     count = 0
 
-    handleEffectsInstance = handleEffects()
+    handleEffectsInstance = HandleEffects()
     handleEffectsInstance.loadFlameImages()
 
     handleEffectsInstance.loadLightningImages()
@@ -111,88 +111,74 @@ def handleLightningEffect(handleEffectsInstance, multi_hand_landmarks, image, co
 
     return handleEffectsInstance.apartDrawer(image, count, indexBaseXCoordinate, indexBaseYCoordinate, indexBaseXCoordinateSecondHand, indexBaseYCoordinateSecondHand, baseYCoordinate)
 
-def processFrame(handleEffectsInstance, count, image, hands, neighbours, closeOrApart, mostRecentPredictions, finishingAction):
-    image_height, image_width, _ = image.shape
-    annotated_image = image.copy()
-    annotated_image = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
-
-    #run mediapipe on the image, find the hands
-    results = hands.process(annotated_image)
+def processFrame(handleEffects, count, image, hands, neighbours, closeOrApart, recentPredictions, finishingAction):
+    imageHeight, imageWidth, _ = image.shape
+    annotatedImage = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2RGB)
+    results = hands.process(annotatedImage)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
 
-    #if there are any hands in the image
-    if results.multi_hand_landmarks:
+    if not results.multi_hand_landmarks:
+        handleNoHands(count, finishingAction, recentPredictions)
+        return image
 
-        #if it is not the first frame
-        if count>0:
-            #if currently snapping..
-            if handleEffectsInstance.snapActive == True:
-                #for each hand...
-                for hand_landmarks in results.multi_hand_landmarks:
-                    image = handleSnapEffect(handleEffectsInstance, hand_landmarks, image, count, image_width, image_height)
+    if count > 0:
+        if handleEffects.snapActive:
+            for handLandmarks in results.multi_hand_landmarks:
+                image = handleSnapEffect(handleEffects, handLandmarks, image, count, imageWidth, imageHeight)
 
-            #if the hands are apart after being together..
-            if handleEffectsInstance.apartActive == True and len(results.multi_hand_landmarks) == 2:
-                image = handleLightningEffect(handleEffectsInstance, results.multi_hand_landmarks, image, count, image_width, image_height)
+        if handleEffects.apartActive and len(results.multi_hand_landmarks) == 2:
+            image = handleLightningEffect(handleEffects, results.multi_hand_landmarks, image, count, imageWidth, imageHeight)
 
-            relativeCoordinate, indexBaseCoordinates, relativeCoordinatesOfAllLandmarks = findHandLandmarkRelativeCoordinates(results.multi_hand_landmarks, image_height, image_width)
+        relativeCoords, indexBase, allLandmarks = findHandLandmarkRelativeCoordinates(results.multi_hand_landmarks, imageHeight, imageWidth)
 
-        #if there's 1 hand, the difference between 2 hands is -100
-        if len(relativeCoordinate) == 2:
-            diff = Constants.DIFFERENCE_VALUE_ONE_HAND
+        diff = calculateHandDistance(relativeCoords, indexBase)
+        thumbs = predictHandPosition(allLandmarks, diff, neighbours, closeOrApart)
 
-        #if there are 2 hands, the difference is the distance between them
-        if len(relativeCoordinate) == 4:
-            #how the x and y coords of the 0 positions of both hands are layed out in the np array
-            zx = abs(relativeCoordinate[0] - relativeCoordinate[2])
-            zy = abs(relativeCoordinate[1] - relativeCoordinate[3])
-            indexTipDifferenceX = abs(relativeCoordinate[2] - indexBaseCoordinates[0])
-            indexTipDifferenceY = abs(relativeCoordinate[3] - indexBaseCoordinates[1])
-            indexTipDifference = sqrt(square(indexTipDifferenceY) + square(indexTipDifferenceX))
+        image = cv2.putText(
+            image, str(thumbs), (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1, cv2.LINE_AA
+        )
 
-            diff = sqrt(square(zx) + square(zy))
-            diff = diff/indexTipDifference
-
-        #run the data on the model to predict the hand position
-        relativeCoordinatesOfAllLandmarksHand1 = relativeCoordinatesOfAllLandmarks[:42]
-        relativeCoordinatesOfAllLandmarksHand2 = relativeCoordinatesOfAllLandmarks[42:]
-
-        interest = sklearn.preprocessing.normalize([relativeCoordinatesOfAllLandmarksHand1])[0]
-        if not relativeCoordinatesOfAllLandmarksHand2[0] == Constants.DIFFERENCE_VALUE_ONE_HAND:
-            interest2 = sklearn.preprocessing.normalize([relativeCoordinatesOfAllLandmarksHand2])[0]
-        else:
-            interest2 = relativeCoordinatesOfAllLandmarksHand2
-        interest = np.append(interest,interest2)
-
-        interest = np.append(interest,[diff])
-        thumbs = neighbours.predict([interest])[0]
-
-        if thumbs == Constants.HANDS_APART or thumbs == Constants.HANDS_TOGETHER:
-            diff = np.array([diff])
-            updatedThumbs = closeOrApart.predict(diff.reshape(-1,1))[0]
-            thumbs = updatedThumbs
-
-        image = cv2.putText(image, str(thumbs), (50,50), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255,255,255), 1, cv2.LINE_AA)
-
-        #add the prediction to this frame's location
-        mostRecentPredictions[count%Constants.MOST_RECENT_PREDICTIONS] = thumbs
+        recentPredictions[count % Constants.MOST_RECENT_PREDICTIONS] = thumbs
         finishingAction[count % Constants.HOLD_END_CLICK] = thumbs
 
-    else:
-
-        finishingAction[count % Constants.HOLD_END_CLICK] = 100
-        finishingAction[(count+1) % Constants.HOLD_END_CLICK] = 100
-        mostRecentPredictions[count % Constants.MOST_RECENT_PREDICTIONS] = 100
-        mostRecentPredictions[(count+1) % Constants.MOST_RECENT_PREDICTIONS] = 100
-
-    #check whether a snap has occured
-    handleEffectsInstance.snapChecker(mostRecentPredictions, finishingAction)
-
-    #check whether 'apart' has occured
-    handleEffectsInstance.apartChecker(mostRecentPredictions, finishingAction)
+    handleEffects.snapChecker(recentPredictions, finishingAction)
+    handleEffects.apartChecker(recentPredictions, finishingAction)
 
     return image
+
+
+def handleNoHands(count, finishingAction, recentPredictions):
+    finishingAction[count % Constants.HOLD_END_CLICK] = 100
+    finishingAction[(count+1) % Constants.HOLD_END_CLICK] = 100
+    recentPredictions[count % Constants.MOST_RECENT_PREDICTIONS] = 100
+    recentPredictions[(count+1) % Constants.MOST_RECENT_PREDICTIONS] = 100
+
+
+def calculateHandDistance(relativeCoords, indexBase):
+    if len(relativeCoords) == 2:
+        return Constants.DIFFERENCE_VALUE_ONE_HAND
+
+    zx, zy = abs(relativeCoords[0] - relativeCoords[2]), abs(relativeCoords[1] - relativeCoords[3])
+    indexTipX, indexTipY = abs(relativeCoords[2] - indexBase[0]), abs(relativeCoords[3] - indexBase[1])
+    indexTipDiff = sqrt(indexTipX**2 + indexTipY**2)
+    return sqrt(zx**2 + zy**2) / indexTipDiff
+
+
+def predictHandPosition(allLandmarks, diff, neighbours, closeOrApart):
+    hand1Coords = allLandmarks[:42]
+    hand2Coords = allLandmarks[42:]
+
+    normalizedHand1 = sklearn.preprocessing.normalize([hand1Coords])[0]
+    normalizedHand2 = (sklearn.preprocessing.normalize([hand2Coords])[0] if hand2Coords[0] != Constants.DIFFERENCE_VALUE_ONE_HAND else hand2Coords)
+
+    features = np.append(normalizedHand1, normalizedHand2)
+    features = np.append(features, [diff])
+    thumbs = neighbours.predict([features])[0]
+
+    if thumbs in {Constants.HANDS_APART, Constants.HANDS_TOGETHER}:
+        thumbs = closeOrApart.predict(np.array([diff]).reshape(-1, 1))[0]
+
+    return thumbs
 
 def findHandLandmarkRelativeCoordinates(multiHandLandmarks, image_height, image_width):
 
